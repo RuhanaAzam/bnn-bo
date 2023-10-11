@@ -34,7 +34,6 @@ def round(test_function_name, x):
         x = torch.floor(x)
     return x
 
-
 def bayes_opt(model, test_function, args, init_x, init_y, model_save_dir, device, model_name, test_function_name):
     q = int(args["batch_size"])
     output_dim = init_y.shape[-1]
@@ -164,7 +163,6 @@ def initialize_points(test_function, n_init_points, output_dim, device, test_fun
         init_y = init_y.unsqueeze(-1)
     return init_x, init_y
 
-
 def construct_acqf_by_model(model_name, model, train_x, train_y, test_function):
     sampler = StochasticSampler(sample_shape=torch.Size([128]))
     if test_function.num_objectives == 1:
@@ -189,7 +187,6 @@ def construct_acqf_by_model(model_name, model, train_x, train_y, test_function):
             sampler=sampler
         )
         return qEHVI
-
 
 def get_test_function(test_function, seed):
     test_function = test_function.lower()
@@ -242,15 +239,33 @@ def get_test_function(test_function, seed):
     elif "poly" in test_function:
         dim = int(test_function.split('_')[1])
         return PolyDraw(dim, seed)
+    elif test_function == "eggholder": #adding my own test functions here: eggholder, michz, my search space, (do delta one later, yes)
+        return EggHolder(negate=True)
+    elif test_function == "michalewicz":
+        func = Michalewicz(dim=2, negate=True)
+        func.bounds[0, :].fill_(0) #you might need to modify 
+        func.bounds[1, :].fill_(10)
+        return  func
+    elif test_function == "narea_coh2":
+        from test_functions.coh2 import Coh2
+        return Coh2(type="narea")
+    elif test_function == "sla_coh2":
+        from test_functions.coh2 import Coh2
+        return Coh2(type="sla")
+    elif test_function == "pn_coh2":
+        from test_functions.coh2 import Coh2
+        return Coh2(type="pn")
+    elif test_function == "ps_coh2":
+        from test_functions.coh2 import Coh2
+        return Coh2(type="ps")
     else:
         raise NotImplementedError(
             "Test function %s does not exist." % test_function)
 
-
 def main(cl_args):
     
     current_time = datetime.now()
-    args = json.load(open("./config/" + cl_args.config + ".json", 'r'))
+    args = json.load(open(cl_args.config, 'r'))
 
     # set save_dir name
     save_dir = current_time.strftime("experiment_results/%y_%m_%d-%H_%M_%S")
@@ -272,7 +287,9 @@ def main(cl_args):
         # save config
         with open(save_dir + '/config.json', 'w') as f:
             json.dump(args, f, indent=2)
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') #CHANGE BACK!
+        #device = torch.device('cpu')
+        print(f"Device Used: {device}")
         torch.set_default_dtype(torch.float64)
         torch.manual_seed(int(args["seed"]))
 
@@ -315,13 +332,28 @@ def main(cl_args):
 
             torch.cuda.empty_cache()
 
-
+        #should create plots here
+        import plot_util 
+        results = []
+        models = []
+        for model_id, model_args in model_dict.items(): #loop though each model
+            model_name = model_args["model"] #get model name
+            Y = [] #running best per trial
+            for trial_num in range(1,args["n_trials"] + 1):
+                #filex = f"./{save_dir}/trial_{trial_num}/{model_name}/train_x.pt" 
+                filey = f"./{save_dir}/trial_{trial_num}/{model_name}/train_y.pt" 
+                Y_i = torch.load(filey)
+                Y.append(plot_util.getRunningBest(Y_i))
+            Y = torch.stack(Y)
+            results.append(Y)
+            models.append(model_name)
+        plot_util.multiPlot(results, models, args["test_function"], save=f"./{save_dir}.png")
         os.rename(save_dir, save_dir + "_done")
+        print("Models Tested:", models)
         print("Done!")
     except:
         print(traceback.print_exc())
         os.rename(save_dir, save_dir + "_canceled")
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

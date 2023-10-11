@@ -17,13 +17,14 @@ def getStat(X):
     return mean.reshape(-1), std.reshape(-1)
 
 def multiPlot(results, labels, title, save="./test.png"):
+    print(len(results))
     colors = ["Pink", "Blue", "Green", "Orange", "Purple", "Yellow"]
     for i, Y in enumerate(results):
         line = torch.arange(0, Y.shape[1], 1)
         mean, std = getStat(Y)
         plt.plot(line, mean, label= labels[i], color=colors[i])
         plt.fill_between(line, mean - std,  mean + std, alpha=0.3, color=colors[i])
-        plt.title(f"{title}")
+    plt.title(f"{title}")
     plt.xlabel("Iteration (n)")
     plt.ylabel("Max(f(X))")
     plt.legend(loc="lower right", )
