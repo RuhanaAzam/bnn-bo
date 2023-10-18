@@ -20,10 +20,9 @@ from botorch.utils.multi_objective.box_decompositions.non_dominated import \
 from botorch.utils.sampling import draw_sobol_samples
 from botorch.utils.transforms import normalize, unnormalize
 from models import *
-from test_functions import (BnnDraw, KnowledgeDistillation, LunarLanderProblem,
-                            OilSorbent, Optics, PDEVar, PestControl, PolyDraw,
-                            cco)
-
+# from test_functions import (BnnDraw, KnowledgeDistillation, LunarLanderProblem,
+#                             OilSorbent, Optics, PDEVar, PestControl, PolyDraw,
+#                             cco)
 
 def round(test_function_name, x):
     if test_function_name == "oil":
@@ -33,6 +32,27 @@ def round(test_function_name, x):
     elif test_function_name == "pest":
         x = torch.floor(x)
     return x
+
+def random_search(test_function, args, seed, model_save_dir, device):
+    #randomly select points
+    n = args["n_BO_iters"] + args["n_init_points"]
+    dim = test_function.dim
+    lb = test_function.bounds[0].to(device) #lower bounds
+    ub = test_function.bounds[1].to(device) #upper bounds
+    print(lb, ub)
+
+    torch.manual_seed(seed)
+    x = torch.rand((n, dim), dtype=torch.float64, device=device,)
+    x = x * (ub - lb) + x #adjust to match bounds
+    y = test_function(x)
+
+    #save all points
+    if model_save_dir is not None:
+        torch.save(x.cpu(), "%s/train_x.pt" % model_save_dir)
+        torch.save(y.cpu(), "%s/train_y.pt" % model_save_dir)
+    
+    max_index = torch.argmax(y) #index of highest point
+    return x[max_index], y[max_index]
 
 def bayes_opt(model, test_function, args, init_x, init_y, model_save_dir, device, model_name, test_function_name):
     q = int(args["batch_size"])
@@ -67,8 +87,8 @@ def bayes_opt(model, test_function, args, init_x, init_y, model_save_dir, device
         acq_start = time.time()
         acquisition = construct_acqf_by_model(model_name, model, normalized_x, train_y, test_function)
         normalized_candidates, acqf_values = optimize_acqf(
-            acquisition, standard_bounds, q=q, num_restarts=2, raw_samples=16, return_best_only=False,
-            options={"batch_limit": 1, "maxiter": 10})
+           acquisition, standard_bounds, q=q, num_restarts=2, raw_samples=16, return_best_only=False,
+           options={"batch_limit": 1, "maxiter": 10})
         candidates = unnormalize(normalized_candidates.detach(), bounds=bounds)
 
         # round candiates
@@ -121,7 +141,6 @@ def bayes_opt(model, test_function, args, init_x, init_y, model_save_dir, device
         max_index = torch.argmax(train_y)
         return train_x[max_index], train_y[max_index]
 
-
 def initialize_model(model_name, model_args, input_dim, output_dim, device):
     if model_name == 'gp':
         if output_dim == 1:
@@ -148,7 +167,6 @@ def initialize_model(model_name, model_args, input_dim, output_dim, device):
         return Ensemble(model_args, input_dim, output_dim, device)
     else:
         raise NotImplementedError("Model type %s does not exist" % model_name)
-
 
 def initialize_points(test_function, n_init_points, output_dim, device, test_function_name):
     if n_init_points < 1:
@@ -263,7 +281,6 @@ def get_test_function(test_function, seed):
             "Test function %s does not exist." % test_function)
 
 def main(cl_args):
-    
     current_time = datetime.now()
     args = json.load(open(cl_args.config, 'r'))
 
@@ -288,8 +305,8 @@ def main(cl_args):
         with open(save_dir + '/config.json', 'w') as f:
             json.dump(args, f, indent=2)
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') #CHANGE BACK!
-        #device = torch.device('cpu')
         print(f"Device Used: {device}")
+        
         torch.set_default_dtype(torch.float64)
         torch.manual_seed(int(args["seed"]))
 
@@ -320,11 +337,15 @@ def main(cl_args):
                 os.makedirs(model_save_dir + "/queries")
 
                 print("-" * 20, "running " + model_id, "-" * 20)
-                start_time = time.time()
-                model = initialize_model(model_name, model_args, input_dim, output_dim, device)
-                best_x, best_y = bayes_opt(
-                    model, test_function, args, init_x, init_y, model_save_dir, device, model_name, test_function_name)
-                del model
+                if model_name == "random":
+                    start_time = time.time()
+                    best_x, best_y = random_search(test_function, args, trial, model_save_dir, device)
+                else:
+                    start_time = time.time()
+                    model = initialize_model(model_name, model_args, input_dim, output_dim, device)
+                    best_x, best_y = bayes_opt(
+                        model, test_function, args, init_x, init_y, model_save_dir, device, model_name, test_function_name)
+                    del model
 
                 print("\nMax value found was", best_y.cpu().numpy())
                 # print("at", best_x.cpu().numpy())
@@ -337,16 +358,14 @@ def main(cl_args):
         results = []
         models = []
         for model_id, model_args in model_dict.items(): #loop though each model
-            model_name = model_args["model"] #get model name
             Y = [] #running best per trial
             for trial_num in range(1,args["n_trials"] + 1):
-                #filex = f"./{save_dir}/trial_{trial_num}/{model_name}/train_x.pt" 
-                filey = f"./{save_dir}/trial_{trial_num}/{model_name}/train_y.pt" 
+                filey = f"./{save_dir}/trial_{trial_num}/{model_id}/train_y.pt" 
                 Y_i = torch.load(filey)
                 Y.append(plot_util.getRunningBest(Y_i))
             Y = torch.stack(Y)
             results.append(Y)
-            models.append(model_name)
+            models.append(model_id)
         plot_util.multiPlot(results, models, args["test_function"], save=f"./{save_dir}.png")
         os.rename(save_dir, save_dir + "_done")
         print("Models Tested:", models)
