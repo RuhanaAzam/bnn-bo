@@ -8,7 +8,7 @@ from botorch.models.model_list_gp_regression import ModelListGP
 from botorch.models.transforms.outcome import Standardize
 from botorch.posteriors import Posterior
 from gpytorch.constraints import Interval
-from gpytorch.kernels import MaternKernel, ScaleKernel
+from gpytorch.kernels import MaternKernel, ScaleKernel, SpectralMixtureKernel
 from gpytorch.likelihoods import GaussianLikelihood
 from gpytorch.mlls import ExactMarginalLogLikelihood
 from gpytorch.mlls.sum_marginal_log_likelihood import SumMarginalLogLikelihood
@@ -23,6 +23,24 @@ class SingleTaskGP(Model):
         self.gp = None
         self.output_dim = output_dim
         self.nu = model_args["nu"] if "nu" in model_args else 2.5
+
+        if "kernel" not in model_args or model_args["kernel"] == "Matern":
+            self.covar_module = ScaleKernel(
+                    MaternKernel(
+                        nu=2.5,
+                        ard_num_dims=input_dim,
+                    )
+                )
+        elif model_args == "SpectralMixture-4" or model_args== "SpectralMixture":
+            self.covar_module = SpectralMixtureKernel(
+                num_mixtures=4, 
+                ard_num_dims=input_dim)
+        elif model_args == "SpectralMixture-10":
+            self.covar_module = SpectralMixtureKernel(
+                num_mixtures=10, 
+                ard_num_dims=input_dim)
+        else:
+            print("Not a valid kernel") #should also throw error
 
     def posterior(
         self,
@@ -46,7 +64,7 @@ class SingleTaskGP(Model):
         if self.output_dim > 1:
             raise RuntimeError(
                 "SingleTaskGP does not fit tasks with multiple objectives")
-
+        
         self.gp = botorch.models.SingleTaskGP(
             train_x, train_y, outcome_transform=Standardize(m=1)).to(train_x)
         mll = ExactMarginalLogLikelihood(
@@ -87,7 +105,9 @@ class MultiTaskGP(Model):
                 botorch.models.SingleTaskGP(
                     train_x,
                     train_y[:, d].unsqueeze(-1),
-                    outcome_transform=Standardize(m=1)).to(train_x))
+                    outcome_transform=Standardize(m=1),
+                    covar_module=self.covar_module).to(train_x)
+                )
 
         self.gp = ModelListGP(*models)
         mll = SumMarginalLogLikelihood(self.gp.likelihood, self.gp).to(train_x)
