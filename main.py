@@ -33,9 +33,9 @@ def round(test_function_name, x):
         x = torch.floor(x)
     return x
 
-def random_search(test_function, args, seed, model_save_dir, device):
+def random_search(init_x, init_y, test_function, args, seed, model_save_dir, device):
     #randomly select points
-    n = args["n_BO_iters"] + args["n_init_points"]
+    n = (args["n_BO_iters"] * args["batch_size"])
     dim = test_function.dim
     lb = test_function.bounds[0].to(device) #lower bounds
     ub = test_function.bounds[1].to(device) #upper bounds
@@ -44,7 +44,15 @@ def random_search(test_function, args, seed, model_save_dir, device):
     torch.manual_seed(seed)
     x = torch.rand((n, dim), dtype=torch.float64, device=device,)
     x = x * (ub - lb) + x #adjust to match bounds
-    y = test_function(x)
+    y = test_function(x).unsqueeze(-1)
+
+    #add initial points
+    print(init_x.shape, x.shape)
+    x = torch.cat((init_x, x))
+    print(x.shape)
+    print(init_y.shape, y.shape)
+
+    y = torch.cat((init_y, y))
 
     #save all points
     if model_save_dir is not None:
@@ -144,7 +152,8 @@ def bayes_opt(model, test_function, args, init_x, init_y, model_save_dir, device
 def initialize_model(model_name, model_args, input_dim, output_dim, device):
     if model_name == 'gp':
         if output_dim == 1:
-            return SingleTaskGP(model_args, input_dim, output_dim)
+            from botorch.models.transforms.outcome import Standardize
+            return SingleTaskGP(model_args, input_dim, output_dim)#, outcome_transform=Standardize(1))
         else:
             return MultiTaskGP(model_args, input_dim, output_dim)
     elif model_name == 'dkl':
@@ -304,7 +313,14 @@ def main(cl_args):
         # save config
         with open(save_dir + '/config.json', 'w') as f:
             json.dump(args, f, indent=2)
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') #CHANGE BACK!
+        
+        #set device
+        if "device" in args:
+            device = args["device"]
+            device = torch.device(device if torch.cuda.is_available() else 'cpu') #CHANGE BACK!
+        else:
+            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') #CHANGE BACK!
+        #device = torch.device('cpu')
         print(f"Device Used: {device}")
         
         torch.set_default_dtype(torch.float64)
@@ -339,7 +355,8 @@ def main(cl_args):
                 print("-" * 20, "running " + model_id, "-" * 20)
                 if model_name == "random":
                     start_time = time.time()
-                    best_x, best_y = random_search(test_function, args, trial, model_save_dir, device)
+                    best_x, best_y = random_search(init_x, init_y, test_function, args, trial, model_save_dir, device)
+
                 else:
                     start_time = time.time()
                     model = initialize_model(model_name, model_args, input_dim, output_dim, device)
