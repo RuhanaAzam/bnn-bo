@@ -47,11 +47,7 @@ def random_search(init_x, init_y, test_function, args, seed, model_save_dir, dev
     y = test_function(x).unsqueeze(-1)
 
     #add initial points
-    print(init_x.shape, x.shape)
     x = torch.cat((init_x, x))
-    print(x.shape)
-    print(init_y.shape, y.shape)
-
     y = torch.cat((init_y, y))
 
     #save all points
@@ -94,9 +90,16 @@ def bayes_opt(model, test_function, args, init_x, init_y, model_save_dir, device
         
         acq_start = time.time()
         acquisition = construct_acqf_by_model(model_name, model, normalized_x, train_y, test_function)
+        
+        torch.manual_seed(args["seed"]) #added for reproducibility, random restarts will be generated with same seeds
         normalized_candidates, acqf_values = optimize_acqf(
-           acquisition, standard_bounds, q=q, num_restarts=2, raw_samples=16, return_best_only=False,
-           options={"batch_limit": 1, "maxiter": 10})
+           acquisition, 
+           standard_bounds, 
+           q=q, 
+           num_restarts=2, 
+           raw_samples=16, 
+           return_best_only=False,
+           options={"batch_limit": 1, "maxiter": 10}) 
         candidates = unnormalize(normalized_candidates.detach(), bounds=bounds)
 
         # round candiates
@@ -152,8 +155,7 @@ def bayes_opt(model, test_function, args, init_x, init_y, model_save_dir, device
 def initialize_model(model_name, model_args, input_dim, output_dim, device):
     if model_name == 'gp':
         if output_dim == 1:
-            from botorch.models.transforms.outcome import Standardize
-            return SingleTaskGP(model_args, input_dim, output_dim)#, outcome_transform=Standardize(1))
+            return SingleTaskGP(model_args, input_dim, output_dim)
         else:
             return MultiTaskGP(model_args, input_dim, output_dim)
     elif model_name == 'dkl':
@@ -196,7 +198,7 @@ def construct_acqf_by_model(model_name, model, train_x, train_y, test_function):
         qEI = qExpectedImprovement(
             model=model,
             best_f=train_y.max(),
-            sampler=sampler
+            #sampler=sampler #removed to make deterministic for reproducibility
         )
         return qEI
     else: # multi-objective
@@ -211,7 +213,7 @@ def construct_acqf_by_model(model_name, model, train_x, train_y, test_function):
             model=model,
             ref_point=test_function.ref_point.to(train_x),
             partitioning=partitioning,
-            sampler=sampler
+            #sampler=sampler
         )
         return qEHVI
 
@@ -356,7 +358,6 @@ def main(cl_args):
                 if model_name == "random":
                     start_time = time.time()
                     best_x, best_y = random_search(init_x, init_y, test_function, args, trial, model_save_dir, device)
-
                 else:
                     start_time = time.time()
                     model = initialize_model(model_name, model_args, input_dim, output_dim, device)
