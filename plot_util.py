@@ -1,5 +1,9 @@
+import torch
+import numpy as np
 import matplotlib.pyplot as plt
-import torch 
+
+def ismonotonic(numbers):
+    return all(numbers[i] <= numbers[i + 1] for i in range(len(numbers) - 1))
 
 def getRunningBest(X):
     running_best_values = torch.empty(len(X))
@@ -17,26 +21,19 @@ def getStat(X):
     return mean.reshape(-1), std.reshape(-1)
 
 def multiPlot(results, labels, title, save="./test.png"):
-    print(len(results))
+    print(f"Plotting {len(results)} seeds...")
+
     colors = ["Pink", "Blue", "Green", "Orange", "Purple", "Yellow"]
     for i, Y in enumerate(results):
         line = torch.arange(0, Y.shape[1], 1)
         mean, std = getStat(Y)
+        #check mean is monotonically increasing
+        assert ismonotonic(mean), "Your results are not monotonically increasing, this might be an issue"
+        
         plt.plot(line, mean, label= labels[i], color=colors[i])
         plt.fill_between(line, mean - std,  mean + std, alpha=0.3, color=colors[i])
     plt.title(f"{title}")
     plt.xlabel("Iteration (n)")
     plt.ylabel("Max(f(X))")
     plt.legend(loc="lower right", )
-    plt.savefig(save)
-    return 
-
-# Y = []
-# for trial in range(1,6):
-#     filex = f"/lfs/ampere1/0/ruhana/bnn-bo/experiment_results/23_09_27-10_42_54_config/small_test.json_ackley_10_done/trial_{trial}/gp/train_x.pt"
-#     filey = f"/lfs/ampere1/0/ruhana/bnn-bo/experiment_results/23_09_27-10_42_54_config/small_test.json_ackley_10_done/trial_{trial}/gp/train_y.pt"
-#     Y_i = torch.load(filey)
-#     Y.append(getRunningBest(Y_i))
-# Y = torch.stack(Y)
-# multiPlot([Y], ["gp"], "Title Here")
-# exit()
+    return
