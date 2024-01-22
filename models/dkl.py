@@ -50,7 +50,6 @@ class RegNet(torch.nn.Sequential):
             self.dimensions[-2], self.dimensions[-1], dtype=dtype, device=device)
         )
 
-
 class DKLGP(BatchedMultiOutputGPyTorchModel, ExactGP):
 
     def __init__(
@@ -94,22 +93,24 @@ class DKLGP(BatchedMultiOutputGPyTorchModel, ExactGP):
             self, train_inputs=train_X, train_targets=train_Y, likelihood=likelihood
         )
         self.mean_module = ConstantMean(batch_shape=self._aug_batch_shape)
-        self.covar_module = ScaleKernel(
-                MaternKernel(
-                    nu=2.5,
-                    ard_num_dims=model_args["regnet_dims"][-1],
+
+        if covar_module is None:
+            self.covar_module = ScaleKernel(
+                    MaternKernel(
+                        nu=2.5,
+                        ard_num_dims=model_args["regnet_dims"][-1],
+                        batch_shape=self._aug_batch_shape,
+                        lengthscale_prior=GammaPrior(3.0, 6.0),
+                    ),
                     batch_shape=self._aug_batch_shape,
-                    lengthscale_prior=GammaPrior(3.0, 6.0),
-                ),
-                batch_shape=self._aug_batch_shape,
-                outputscale_prior=GammaPrior(2.0, 0.15),
-            )
-        self._subset_batch_dict = {
-            "likelihood.noise_covar.raw_noise": -2,
-            "mean_module.raw_constant": -1,
-            "covar_module.raw_outputscale": -1,
-            "covar_module.base_kernel.raw_lengthscale": -3,
-        }
+                    outputscale_prior=GammaPrior(2.0, 0.15),
+                )
+            self._subset_batch_dict = {
+                "likelihood.noise_covar.raw_noise": -2,
+                "mean_module.raw_constant": -1,
+                "covar_module.raw_outputscale": -1,
+                "covar_module.base_kernel.raw_lengthscale": -3,
+            }
         # TODO: Allow subsetting of other covar modules
         if outcome_transform is not None:
             self.outcome_transform = outcome_transform
@@ -143,7 +144,6 @@ class DKLGP(BatchedMultiOutputGPyTorchModel, ExactGP):
         mean_x = self.mean_module(projected_x)
         covar_x = self.covar_module(projected_x)
         return MultivariateNormal(mean_x, covar_x)
-
 
 class SingleTaskDKL(Model):
 
@@ -214,7 +214,6 @@ class SingleTaskDKL(Model):
                     f"noise: {model.likelihood.noise.item():>4.3f}" 
                 )
             optimizer.step()
-
 
 class MultiTaskDKL(Model):
 

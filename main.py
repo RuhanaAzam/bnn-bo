@@ -7,7 +7,7 @@ import traceback
 from datetime import datetime
 
 import torch
-from botorch.acquisition import qExpectedImprovement
+from botorch.acquisition import qExpectedImprovement#, qLogExpectedImprovement
 from botorch.acquisition.multi_objective.monte_carlo import \
     qExpectedHypervolumeImprovement
 from botorch.optim import optimize_acqf
@@ -39,11 +39,10 @@ def random_search(init_x, init_y, test_function, args, seed, model_save_dir, dev
     dim = test_function.dim
     lb = test_function.bounds[0].to(device) #lower bounds
     ub = test_function.bounds[1].to(device) #upper bounds
-    print(lb, ub)
 
     torch.manual_seed(seed)
     x = torch.rand((n, dim), dtype=torch.float64, device=device,)
-    x = x * (ub - lb) + x #adjust to match bounds
+    x = x * (ub - lb) + lb #adjust to match bounds
     y = test_function(x).unsqueeze(-1)
 
     #add initial points
@@ -89,9 +88,13 @@ def bayes_opt(model, test_function, args, init_x, init_y, model_save_dir, device
         print("fit time", model_end - model_start)
         
         acq_start = time.time()
+        print(normalized_x)
+        print(train_y)
         acquisition = construct_acqf_by_model(model_name, model, normalized_x, train_y, test_function)
         
         torch.manual_seed(args["seed"]) #added for reproducibility, random restarts will be generated with same seeds
+        print(acquisition)
+        print(standard_bounds)
         normalized_candidates, acqf_values = optimize_acqf(
            acquisition, 
            standard_bounds, 
@@ -179,12 +182,12 @@ def initialize_model(model_name, model_args, input_dim, output_dim, device):
     else:
         raise NotImplementedError("Model type %s does not exist" % model_name)
 
-def initialize_points(test_function, n_init_points, output_dim, device, test_function_name):
+def initialize_points(test_function, n_init_points, output_dim, device, test_function_name, seed=None):
     if n_init_points < 1:
         init_x = torch.zeros(1, 1).to(device)
     else:
         bounds = test_function.bounds.to(device, dtype=torch.float64)
-        init_x = draw_sobol_samples(bounds=bounds, n=n_init_points, q=1).squeeze(-2)
+        init_x = draw_sobol_samples(bounds=bounds, n=n_init_points, q=1, seed=seed).squeeze(-2)
         init_x = round(test_function_name, init_x)
     init_y = test_function(init_x)
     # add explicit output dimension
@@ -195,11 +198,16 @@ def initialize_points(test_function, n_init_points, output_dim, device, test_fun
 def construct_acqf_by_model(model_name, model, train_x, train_y, test_function):
     sampler = StochasticSampler(sample_shape=torch.Size([128]))
     if test_function.num_objectives == 1:
+        
+        # qEI = qLogExpectedImprovement(
+        #     model=model,
+        #     best_f=train_y.max())
         qEI = qExpectedImprovement(
             model=model,
             best_f=train_y.max(),
             #sampler=sampler #removed to make deterministic for reproducibility
         )
+        #print(qEI)
         return qEI
     else: # multi-objective
         with torch.no_grad():
@@ -319,10 +327,9 @@ def main(cl_args):
         #set device
         if "device" in args:
             device = args["device"]
-            device = torch.device(device if torch.cuda.is_available() else 'cpu') #CHANGE BACK!
+            device = torch.device(device if torch.cuda.is_available() else 'cpu') 
         else:
-            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') #CHANGE BACK!
-        #device = torch.device('cpu')
+            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         print(f"Device Used: {device}")
         
         torch.set_default_dtype(torch.float64)
@@ -342,7 +349,8 @@ def main(cl_args):
                 print("True minimum:", test_function._optimal_value)
             
             # get initial points
-            init_x, init_y = initialize_points(test_function, args["n_init_points"], output_dim, device, test_function_name)
+            init_x, init_y = initialize_points(test_function, args["n_init_points"], output_dim, device, test_function_name, seed=trial)
+            
             # run bayes opt for each model
             model_dict = args["models"]
             for model_id, model_args in model_dict.items():
