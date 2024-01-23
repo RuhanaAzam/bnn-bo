@@ -20,7 +20,7 @@ def getStat(X):
     mean, std = torch.mean(X, axis=0), torch.std(X, axis=0)
     return mean.reshape(-1), std.reshape(-1)
 
-def multiPlot(results, labels, title, save="./test.png"):
+def multiPlot(results, labels, title, save=None):
     print(f"Plotting {len(results)} seeds...")
 
     colors = ["Pink", "Blue", "Green", "Orange", "Purple", "Yellow"]
@@ -36,4 +36,7 @@ def multiPlot(results, labels, title, save="./test.png"):
     plt.xlabel("Iteration (n)")
     plt.ylabel("Max(f(X))")
     plt.legend(loc="lower right", )
+
+    if save is not None:
+        plt.savefig(save)
     return
